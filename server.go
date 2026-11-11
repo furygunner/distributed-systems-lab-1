@@ -9,6 +9,7 @@ import (
     "io"
     "net/textproto"
     "strings"
+    "errors"
 )
 
 func main() {
@@ -49,10 +50,18 @@ func getResponse(request *http.Request) http.Response {
     }
     switch filetype {
         case "html", "txt", "gif", "jpeg", "jpg", "css":
-             := findFile(path)
+            body, err := findFile(path)
         default:
             return wellFormed(400, "400 Bad Request")
     }
+}
+
+func findFile(path string) (io.ReadCloser, error) {
+    data, err := os.Open(path)
+    if err != nil {
+        return nil, errors.New("file not found")
+    }
+    return io.NopCloser(data), nil
 }
 
 func wellFormed(code int, status string) http.Response {
