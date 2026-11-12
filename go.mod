@@ -1,3 +1,3 @@
-module github.com/furygunner/distributed-systems-lab-1.git
+module disSys/http_server
 
-go 1.24.4
+go 1.27.3
