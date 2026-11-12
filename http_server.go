@@ -17,43 +17,13 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"bufio"
+	"net/http"
+    "io"
+    "strings"
+    "bytes"
 	//"time" // for testing go routines
 )
-
-// --------------------------------------------------------------------
-
-func handleConnection(conn net.Conn) {
-	defer conn.Close()
-	// -- for local --
-	fmt.Println("established connection with:", conn.RemoteAddr().String())
-
-	// -- for remote --
-	body := "hello client! You are connected to: " + conn.LocalAddr().String() + "\n"
-	resp := "HTTP/1.1 200 OK\r\n" +
-		"Content-Type: text/plain\r\n" +
-		"Content-Length: " + strconv.Itoa(len(body)) + "\r\n" +
-		"Connection: close\r\n" +
-		"\r\n" + // blank line = end of headers
-		body
-	conn.Write([]byte(resp))
-}
-
-// getPort reads the port from the first command line argument
-// and returns an error if it is missing or invalid.
-func getPort() (string, error) {
-	if len(os.Args) != 2 { // there should only be the prg name and 1 arg as input
-		return "", errors.New("usage: ./http_server <port>")
-	}
-
-	port := os.Args[1] // the arg is the port
-	n, err := strconv.Atoi(port)
-	if err != nil || n < 1 || n > 65535 { // only return acceptable
-		return "", errors.New("port must be a number between 1 and 65535")
-	}
-	return port, nil // nil means no error
-}
-
-// --------------------------------------------------------------------
 
 func main() {
 	port, err := getPort()
@@ -64,11 +34,11 @@ func main() {
 
 	// listen to a socket
 	ln, err := net.Listen("tcp", ":"+port)
-	if err != nil {
+	if err != nil { // ASK what does panic mean as an error?
 		fmt.Println(err)
 		os.Exit(1) // can't continue without a listener
 	}
-	defer ln.Close()
+	defer ln.Close() // ASK why does ada not have defer?
 	fmt.Println("listening on port", port)
 
 	// Accept each connection
@@ -76,8 +46,113 @@ func main() {
 		conn, err := ln.Accept()
 		if err != nil {
 			fmt.Println(err)
-			continue
+			continue // ASK why does ada not have continue?
 		}
 		go handleConnection(conn)
 	}
 }
+
+// --------------------------------------------------------------------
+
+func handleConnection(conn net.Conn) {
+	defer conn.Close()
+	// -- for server --
+	fmt.Println("established connection with:", conn.RemoteAddr().String())
+	// -- translate client's  http msg into a http struct
+	reader := bufio.NewReader(conn) // takes the incoming bytes and creates a reader
+	request, err := http.ReadRequest(reader) // formats the http msg
+	if err != nil {
+		fmt.Println("400!") // TO DO actual 400
+		return
+	}
+	// deal with the incoming http struct
+	method := request.Method // GET or POST
+	var response *http.Response
+    switch method {
+		case "GET":
+	    	response := getResponse(request)
+		case "POST":
+			response := postResponse(request)
+		default:
+			response := wellFormed("501 Not Implemented", 501, "txt", []byte("hello"))
+    }
+	// sent the reponse to client
+    response.Write(conn)
+}
+
+// getPort reads the port from the first command line argument
+// and returns an error if it is missing or invalid.
+func getPort() (string, error) {
+	if len(os.Args) != 2 { // there should only be the prg name and 1 arg as input
+		return "", errors.New("usage: ./http_server <port>")
+	}
+	port := os.Args[1] // the arg is the port
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 1 || n > 65535 { // only return acceptable
+		return "", errors.New("port must be a number between 1 and 65535")
+	}
+	return port, nil // nil means no error
+}
+
+func wellFormed(status string, status_code int, contentType string, body []byte) *http.Response {
+    return &http.Response{
+        Status:        status, // e.g. "404 Not Found"
+        StatusCode:    status_code,
+        Proto:         "HTTP/1.1",
+        ProtoMajor:    1,
+        ProtoMinor:    1,
+        Header:        http.Header{"Content-Type": {contentType}},
+        Body:          io.NopCloser(bytes.NewReader(body)),
+        ContentLength: int64(len(body)),
+        Close:         true,
+    }
+}
+
+func getResponse(request *http.Request) *http.Response {
+    path := request.URL.EscapedPath()
+    _, filetype, found := strings.CutLast(path, '.')
+    if !found {
+        return wellFormed("404 Not Found", 404, filetype, []byte("hello"))
+    }
+    switch filetype {
+        case "html", "txt", "gif", "jpeg", "jpg", "css":
+            body, err := findFile(path)
+       		if err != nil {
+				return wellFormed("404 Not Found", 404, filetype, []byte("hello"))
+			}
+			return wellFormed("200 OK", 200, filetype, "hello")
+        default:
+            return wellFormed("400 Bad Request", 400, filetype, []byte("hello"))
+    }
+}
+
+// TO DO just a copy of getResponse for now
+func postResponse(request *http.Request) *http.Response {
+    path := request.URL.EscapedPath()
+    _, filetype, found := strings.CutLast(path, '.')
+    if !found {
+        return wellFormed("404 Not Found", 404, filetype, []byte("hello"))
+    }
+    switch filetype {
+        case "html", "txt", "gif", "jpeg", "jpg", "css":
+            body, err := findFile(path)
+       		if err != nil {
+				return wellFormed("404 Not Found", 404, filetype, []byte("hello"))
+			}
+			return wellFormed("200 OK", 200, filetype, []byte("hello"))
+        default:
+            return wellFormed("400 Bad Request", 400, filetype, []byte("hello"))
+    }
+}
+
+func findFile(path string) (io.ReadCloser, error) {
+    data, err := os.Open(path)
+    if err != nil {
+        return nil, errors.New("file not found")
+    }
+    return io.NopCloser(data), nil
+}
+
+
+// --------------------------------------------------------------------
+
