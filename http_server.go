@@ -70,11 +70,11 @@ func handleConnection(conn net.Conn) {
 	var response *http.Response
     switch method {
 		case "GET":
-	    	response := getResponse(request)
+                	response = getResponse(request)
 		case "POST":
-			response := postResponse(request)
+			response = postResponse(request)
 		default:
-			response := wellFormed("501 Not Implemented", 501, "txt", []byte("hello"))
+			response = wellFormed("501 Not Implemented", 501, "txt", io.NopCloser(bytes.NewReader([]byte("hello"))))
     }
 	// sent the reponse to client
     response.Write(conn)
@@ -94,7 +94,7 @@ func getPort() (string, error) {
 	return port, nil // nil means no error
 }
 
-func wellFormed(status string, status_code int, contentType string, body []byte) *http.Response {
+func wellFormed(status string, status_code int, contentType string, body io.ReadCloser) *http.Response {
     return &http.Response{
         Status:        status, // e.g. "404 Not Found"
         StatusCode:    status_code,
@@ -102,46 +102,46 @@ func wellFormed(status string, status_code int, contentType string, body []byte)
         ProtoMajor:    1,
         ProtoMinor:    1,
         Header:        http.Header{"Content-Type": {contentType}},
-        Body:          io.NopCloser(bytes.NewReader(body)),
-        ContentLength: int64(len(body)),
+        Body:          body,
+        ContentLength: -1,
         Close:         true,
     }
 }
 
 func getResponse(request *http.Request) *http.Response {
     path := request.URL.EscapedPath()
-    _, filetype, found := strings.CutLast(path, '.')
+    _, filetype, found := strings.CutLast(path, ".")
     if !found {
-        return wellFormed("404 Not Found", 404, filetype, []byte("hello"))
+        return wellFormed("404 Not Found", 404, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))
     }
     switch filetype {
         case "html", "txt", "gif", "jpeg", "jpg", "css":
             body, err := findFile(path)
        		if err != nil {
-				return wellFormed("404 Not Found", 404, filetype, []byte("hello"))
+				return wellFormed("404 Not Found", 404, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))
 			}
-			return wellFormed("200 OK", 200, filetype, "hello")
+			return wellFormed("200 OK", 200, filetype, body)
         default:
-            return wellFormed("400 Bad Request", 400, filetype, []byte("hello"))
+            return wellFormed("400 Bad Request", 400, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))
     }
 }
 
 // TO DO just a copy of getResponse for now
 func postResponse(request *http.Request) *http.Response {
     path := request.URL.EscapedPath()
-    _, filetype, found := strings.CutLast(path, '.')
+    _, filetype, found := strings.CutLast(path, ".")
     if !found {
-        return wellFormed("404 Not Found", 404, filetype, []byte("hello"))
+        return wellFormed("404 Not Found", 404, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))
     }
     switch filetype {
         case "html", "txt", "gif", "jpeg", "jpg", "css":
             body, err := findFile(path)
        		if err != nil {
-				return wellFormed("404 Not Found", 404, filetype, []byte("hello"))
+				return wellFormed("404 Not Found", 404, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))
 			}
-			return wellFormed("200 OK", 200, filetype, []byte("hello"))
+			return wellFormed("200 OK", 200, filetype, body)
         default:
-            return wellFormed("400 Bad Request", 400, filetype, []byte("hello"))
+            return wellFormed("400 Bad Request", 400, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))
     }
 }
 
@@ -150,7 +150,7 @@ func findFile(path string) (io.ReadCloser, error) {
     if err != nil {
         return nil, errors.New("file not found")
     }
-    return io.NopCloser(data), nil
+    return data, nil
 }
 
 
