@@ -25,6 +25,8 @@ import (
 	//"time" // for testing go routines
 )
 
+var fileMutex sync.Mutex
+
 func main() {
 	port, err := getPort()
 	if err != nil {
@@ -41,6 +43,7 @@ func main() {
 	defer ln.Close() // ASK why does ada not have defer?
 	fmt.Println("listening on port", port)
 
+	channel := make(chan struct{}, 10) // We want to use 10 channels 
 	// Accept each connection
 	for {
 		conn, err := ln.Accept()
@@ -48,7 +51,12 @@ func main() {
 			fmt.Println(err)
 			continue // ASK why does ada not have continue?
 		}
-		go handleConnection(conn)
+		channel <- struct{}{} // Occupy one of the 10 slots
+		go func() { // Run concurrently
+			defer func() { <-channel }() // Release the slot when finished
+			fmt.Println("Handler started")
+    		handleConnection(conn) 
+		}()
 	}
 }
 
@@ -149,7 +157,9 @@ func postResponse(request *http.Request) *http.Response {
 func findFile(path string) (io.ReadCloser, error) {
     relative, _ := strings.CutPrefix(path, "/")
     fmt.Println(relative) 
+	fileMutex.Lock()
     data, err := os.Open(relative)
+	fileMutex.Unlock()
     if err != nil {
         return nil, errors.New("file not found")
     }
@@ -160,8 +170,10 @@ func findFile(path string) (io.ReadCloser, error) {
 func postFile(path string, body io.ReadCloser) (error) {
     defer body.Close()
     relative, _ := strings.CutPrefix(path, "/")
-    fmt.Println(relative) 
+    fmt.Println(relative)
+	fileMutex.Lock()
     file, err := os.Create(relative)
+	fileMutex.Unlock()
     if err != nil {
         return  errors.New("failed to create file")
     }
