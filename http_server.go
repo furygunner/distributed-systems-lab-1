@@ -70,7 +70,7 @@ func handleConnection(conn net.Conn) {
 	var response *http.Response
     switch method {
 		case "GET":
-                	response = getResponse(request)
+        	response = getResponse(request)
 		case "POST":
 			response = postResponse(request)
 		default:
