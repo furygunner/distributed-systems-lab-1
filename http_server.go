@@ -25,7 +25,11 @@ import (
 	//"time" // for testing go routines
 )
 
+// [topic]subscriberAddr
+topicsMap = make(map[string][]string)
+
 func main() {
+	
 	port, err := getPort()
 	if err != nil {
 		fmt.Println(err)
@@ -112,7 +116,14 @@ func getResponse(request *http.Request) *http.Response {
     path := request.URL.EscapedPath()
     _, filetype, found := strings.CutLast(path, ".")
     if !found {
-        return wellFormed("404 Not Found", 404, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))
+    	// check to see if its a subscribe or post
+    	_, command, found := strings.CutLast(path, "/")
+    	if !found {
+	        return wellFormed("404 Not Found", 404, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))	
+    	}
+    	handlePubSubAction(request, command)
+    	// DO ACTION
+
     }
     switch filetype {
         case "html", "txt", "gif", "jpeg", "jpg", "css":
@@ -131,8 +142,14 @@ func postResponse(request *http.Request) *http.Response {
     path := request.URL.EscapedPath()
     _, filetype, found := strings.CutLast(path, ".")
     if !found {
-        return wellFormed("404 Not Found", 404, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))
-    }
+    	// check to see if its a subscribe or post
+    	_, command, found := strings.CutLast(path, "/")
+    	if !found {
+	        return wellFormed("404 Not Found", 404, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))	
+    	}
+    	handlePubSubAction(request, command)
+    	// DO ACTION
+	}
     switch filetype {
         case "html", "txt", "gif", "jpeg", "jpg", "css":
             body, err := findFile(path)
@@ -143,6 +160,41 @@ func postResponse(request *http.Request) *http.Response {
         default:
             return wellFormed("400 Bad Request", 400, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))
     }
+}
+
+func handlePubSubAction(request *http.Request, command string) (?) {
+	asker := request.RemoteAddr
+	
+	if request.Method = "POST" {
+		if strings.Contains(command, "/publish?topic=") {
+			_, topic, _ := strings.CutLast(command, "=")		
+			// publish to topic
+		}  
+	}
+	if request.Method = "GET" {
+		if strings.Contains(command, "/subscribe?topic=") {
+			_, topic, _	:= strings.CutLast(command, "=")
+			// subscribe to topic
+			strings.Split(topic, t)
+			for t, i := range items {	
+				topicsMap[i] = append(topicsMap[i], asker)
+			}
+		}
+		if strings.Contains(command, "/unsubscribe?topic=") {
+			_, topic, _ := strings.CutLast(command, "=")
+			// unsubscribe to topic	
+			for topicMap, i := range items {	
+				m["fruits"] = append(m["fruits"], "banana")
+				topicsMap[i] = append(topicsMap[i], asker)
+			}
+		}
+		if strings.Contains(command, "/events?topic=") {
+			_, topic, _ := strings.CutLast(command, "=")
+			// idk
+		}	
+	}
+	    
+
 }
 
 func findFile(path string) (io.ReadCloser, error) {
