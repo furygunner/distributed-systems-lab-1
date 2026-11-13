@@ -129,13 +129,14 @@ func getResponse(request *http.Request) *http.Response {
 // TO DO just a copy of getResponse for now
 func postResponse(request *http.Request) *http.Response {
     path := request.URL.EscapedPath()
+    body := request.Body
     _, filetype, found := strings.CutLast(path, ".")
     if !found {
         return wellFormed("404 Not Found", 404, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))
     }
     switch filetype {
         case "html", "txt", "gif", "jpeg", "jpg", "css":
-            body, err := findFile(path)
+            err := postFile(path, body)
        		if err != nil {
 				return wellFormed("404 Not Found", 404, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))
 			}
@@ -156,5 +157,17 @@ func findFile(path string) (io.ReadCloser, error) {
 }
 
 
+func postFile(path string, body io.ReadCloser) (error) {
+    defer body.Close()
+    relative, _ := strings.CutPrefix(path, "/")
+    fmt.Println(relative) 
+    file, err := os.Create(relative)
+    if err != nil {
+        return  errors.New("failed to create file")
+    }
+    defer file.Close()
+    io.Copy(file, body)
+    return nil
+}
 // --------------------------------------------------------------------
 
