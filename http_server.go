@@ -146,7 +146,9 @@ func postResponse(request *http.Request) *http.Response {
 }
 
 func findFile(path string) (io.ReadCloser, error) {
-    data, err := os.Open(path)
+    relative, _ := strings.CutPrefix(path, "/")
+    fmt.Println(relative) 
+    data, err := os.Open(relative)
     if err != nil {
         return nil, errors.New("file not found")
     }
