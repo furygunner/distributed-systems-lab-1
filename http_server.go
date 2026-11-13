@@ -70,11 +70,11 @@ func handleConnection(conn net.Conn) {
 	var response *http.Response
     switch method {
 		case "GET":
-                	response = getResponse(request)
+	    	response = getResponse(request)
 		case "POST":
 			response = postResponse(request)
 		default:
-			response = wellFormed("501 Not Implemented", 501, "txt", io.NopCloser(bytes.NewReader([]byte("hello"))))
+			response = wellFormed("501 Not Implemented", 501, "text/plain", "not implemented\n")
     }
 	// sent the reponse to client
     response.Write(conn)
@@ -94,7 +94,7 @@ func getPort() (string, error) {
 	return port, nil // nil means no error
 }
 
-func wellFormed(status string, status_code int, contentType string, body io.ReadCloser) *http.Response {
+func wellFormed(status string, status_code int, contentType string, body string) *http.Response {
     return &http.Response{
         Status:        status, // e.g. "404 Not Found"
         StatusCode:    status_code,
@@ -102,8 +102,8 @@ func wellFormed(status string, status_code int, contentType string, body io.Read
         ProtoMajor:    1,
         ProtoMinor:    1,
         Header:        http.Header{"Content-Type": {contentType}},
-        Body:          body,
-        ContentLength: -1,
+        Body:          io.NopCloser(bytes.NewReader([]byte(body))),
+        ContentLength: int64(len(body)),
         Close:         true,
     }
 }
@@ -111,18 +111,19 @@ func wellFormed(status string, status_code int, contentType string, body io.Read
 func getResponse(request *http.Request) *http.Response {
     path := request.URL.EscapedPath()
     _, filetype, found := strings.CutLast(path, ".")
+    var body string
     if !found {
-        return wellFormed("404 Not Found", 404, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))
+        return wellFormed("404 Not Found", 404, filetype, "hello")
     }
     switch filetype {
         case "html", "txt", "gif", "jpeg", "jpg", "css":
             body, err := findFile(path)
        		if err != nil {
-				return wellFormed("404 Not Found", 404, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))
+				return wellFormed("404 Not Found", 404, filetype, body)
 			}
-			return wellFormed("200 OK", 200, filetype, body)
+			return wellFormed("200 OK", 200, filetype, "hello")
         default:
-            return wellFormed("400 Bad Request", 400, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))
+            return wellFormed("400 Bad Request", 400, filetype, body)
     }
 }
 
@@ -130,31 +131,55 @@ func getResponse(request *http.Request) *http.Response {
 func postResponse(request *http.Request) *http.Response {
     path := request.URL.EscapedPath()
     _, filetype, found := strings.CutLast(path, ".")
+    var body string
     if !found {
-        return wellFormed("404 Not Found", 404, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))
+        return wellFormed("404 Not Found", 404, filetype, "hello")
     }
     switch filetype {
         case "html", "txt", "gif", "jpeg", "jpg", "css":
-            body, err := findFile(path)
+            body, err := os.ReadFile(path) 
        		if err != nil {
-				return wellFormed("404 Not Found", 404, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))
+				return wellFormed("404 Not Found", 404, filetype, "hello")
 			}
 			return wellFormed("200 OK", 200, filetype, body)
         default:
-            return wellFormed("400 Bad Request", 400, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))
+            return wellFormed("400 Bad Request", 400, filetype, body)
     }
 }
 
-func findFile(path string) (io.ReadCloser, error) {
-    relative, _ := strings.CutPrefix(path, "/")
-    fmt.Println(relative) 
-    data, err := os.Open(relative)
+/*
+func findFile(path string) (file_content []byte, err error) {
+    file, err := os.Open(path)
     if err != nil {
         return nil, errors.New("file not found")
     }
-    return data, nil
-}
 
+    var data []byte
+    buf := make([]byte, 1024)
+    
+    n, err := file.Read(buf)
+    return file.Read, nil 
+}
+*/
+
+func findFile(path string) (content string, err error) {
+	file, err := os.Open(path)
+
+
+
+	content, err := os.Readfile(file)
+
+
+	
+	if err != nil {
+	    return "", errors.New("file not found")
+	} 
+	n, err := file.Read(content)
+	if err != nil & n != 0 {
+	    return "", errors.New("file empty")
+	} 	
+	return string(content), nil
+}
 
 // --------------------------------------------------------------------
 
