@@ -9,6 +9,9 @@ go run . 8080
 nc localhost 8080
 for i in $(seq 1 20); do nc localhost 8080 & done
 curl -v http://localhost:8080/
+
+
+curl -i -X POST "localhost:8080/subscribe?topic=news"
 */
 
 import (
@@ -22,13 +25,14 @@ import (
     "io"
     "strings"
     "bytes"
+    "sync"
 	//"time" // for testing go routines
 )
 
-// [topic]subscriberAddr
-topicsMap = make(map[string][]string)
 
 func main() {
+
+	broker := newBrokerContext()
 	
 	port, err := getPort()
 	if err != nil {
@@ -52,13 +56,13 @@ func main() {
 			fmt.Println(err)
 			continue // ASK why does ada not have continue?
 		}
-		go handleConnection(conn)
+		go handleConnection(conn, broker)
 	}
 }
 
 // --------------------------------------------------------------------
 
-func handleConnection(conn net.Conn) {
+func handleConnection(conn net.Conn, broker *BrokerContext) {
 	defer conn.Close()
 	// -- for server --
 	fmt.Println("established connection with:", conn.RemoteAddr().String())
@@ -74,11 +78,11 @@ func handleConnection(conn net.Conn) {
 	var response *http.Response
     switch method {
 		case "GET":
-        	response = getResponse(request)
+        	response = getResponse(request, broker)
 		case "POST":
-			response = postResponse(request)
+			response = postResponse(request, broker)
 		default:
-			response = wellFormed("501 Not Implemented", 501, "txt", io.NopCloser(bytes.NewReader([]byte("hello"))))
+			response = wellFormed("501 Not Implemented", 501, "text/plain", "in handleConnection\n")
     }
 	// sent the reponse to client
     response.Write(conn)
@@ -98,7 +102,7 @@ func getPort() (string, error) {
 	return port, nil // nil means no error
 }
 
-func wellFormed(status string, status_code int, contentType string, body io.ReadCloser) *http.Response {
+func wellFormed(status string, status_code int, contentType string, body string) *http.Response {
     return &http.Response{
         Status:        status, // e.g. "404 Not Found"
         StatusCode:    status_code,
@@ -106,105 +110,161 @@ func wellFormed(status string, status_code int, contentType string, body io.Read
         ProtoMajor:    1,
         ProtoMinor:    1,
         Header:        http.Header{"Content-Type": {contentType}},
-        Body:          body,
+        Body:          io.NopCloser(bytes.NewReader([]byte(body))),
         ContentLength: -1,
         Close:         true,
     }
 }
 
-func getResponse(request *http.Request) *http.Response {
+func getResponse(request *http.Request, broker *BrokerContext) *http.Response {
     path := request.URL.EscapedPath()
     _, filetype, found := strings.CutLast(path, ".")
     if !found {
     	// check to see if its a subscribe or post
     	_, command, found := strings.CutLast(path, "/")
     	if !found {
-	        return wellFormed("404 Not Found", 404, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))	
+	        return wellFormed("404 Not Found", 404, filetype, "in getResonse\n")	
     	}
-    	handlePubSubAction(request, command)
-    	// DO ACTION
-
+    	return handlePubSubAction(request, command, broker)
     }
     switch filetype {
         case "html", "txt", "gif", "jpeg", "jpg", "css":
             body, err := findFile(path)
        		if err != nil {
-				return wellFormed("404 Not Found", 404, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))
+				return wellFormed("404 Not Found", 404, filetype, "in getResonse/filetype\n")
 			}
 			return wellFormed("200 OK", 200, filetype, body)
         default:
-            return wellFormed("400 Bad Request", 400, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))
+            return wellFormed("400 Bad Request", 400, filetype, "in getResonse/filetype\n")
     }
 }
 
 // TO DO just a copy of getResponse for now
-func postResponse(request *http.Request) *http.Response {
+func postResponse(request *http.Request, broker *BrokerContext) *http.Response {
     path := request.URL.EscapedPath()
     _, filetype, found := strings.CutLast(path, ".")
     if !found {
     	// check to see if its a subscribe or post
     	_, command, found := strings.CutLast(path, "/")
     	if !found {
-	        return wellFormed("404 Not Found", 404, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))	
+	        return wellFormed("404 Not Found", 404, filetype, "in postResponse\n")	
     	}
-    	handlePubSubAction(request, command)
-    	// DO ACTION
+    	return handlePubSubAction(request, command, broker)
 	}
     switch filetype {
         case "html", "txt", "gif", "jpeg", "jpg", "css":
             body, err := findFile(path)
        		if err != nil {
-				return wellFormed("404 Not Found", 404, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))
+				return wellFormed("404 Not Found", 404, filetype, "in postResponse/filetype\n")
 			}
 			return wellFormed("200 OK", 200, filetype, body)
         default:
-            return wellFormed("400 Bad Request", 400, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))
+            return wellFormed("400 Bad Request", 400, filetype, "in postResponse/filetype\n")
     }
 }
 
-func handlePubSubAction(request *http.Request, command string) (?) {
-	asker := request.RemoteAddr
-	
-	if request.Method = "POST" {
-		if strings.Contains(command, "/publish?topic=") {
-			_, topic, _ := strings.CutLast(command, "=")		
-			// publish to topic
-		}  
-	}
-	if request.Method = "GET" {
-		if strings.Contains(command, "/subscribe?topic=") {
-			_, topic, _	:= strings.CutLast(command, "=")
-			// subscribe to topic
-			strings.Split(topic, t)
-			for t, i := range items {	
-				topicsMap[i] = append(topicsMap[i], asker)
-			}
-		}
-		if strings.Contains(command, "/unsubscribe?topic=") {
-			_, topic, _ := strings.CutLast(command, "=")
-			// unsubscribe to topic	
-			for topicMap, i := range items {	
-				m["fruits"] = append(m["fruits"], "banana")
-				topicsMap[i] = append(topicsMap[i], asker)
-			}
-		}
-		if strings.Contains(command, "/events?topic=") {
-			_, topic, _ := strings.CutLast(command, "=")
-			// idk
-		}	
-	}
-	    
 
+
+// __________________ PUBSUB _____________________________
+
+	type Message struct {
+		seq  int // order of each msg chunk
+		body string // on chunk
+	}
+
+	type Subscriber struct {
+		id      int
+		topic   string 
+		pending_msgs []Message // everything waiting to be sent to this subscriber
+	}
+
+	type BrokerContext struct {
+		mu          sync.Mutex // only touch the subscriber list when you have the mutex 
+		nextID      int // for when creating new subscribers
+		nextSeq     map[string]int64      // topic -> last sequence number in Message
+		subscribers map[int]*Subscriber   // id -> subscriber; loop through these whenever a publish occures
+	}
+
+	func newBrokerContext() *BrokerContext {
+		return &BrokerContext{ subscribers: make(map[int]*Subscriber), nextSeq: make(map[string]int64), }
+	}
+
+func handlePubSubAction(request *http.Request, command string, broker *BrokerContext)  *http.Response {
+	topic := request.URL.Query().Get("topic")
+	if topic == "" {
+		return wellFormed("400 Bad Request", 400, "text/plain", "in handlePubSubAction/topic\n")
+	}
+	switch request.URL.Path {      
+		case "/subscribe":
+			// get the lock in order to perform action
+			broker.mu.Lock()
+			defer broker.mu.Unlock()
+			// create a subscriber
+			broker.nextID++
+			id := broker.nextID
+			broker.subscribers[id] = &Subscriber{id: id, topic: topic}
+			return wellFormed("201 Created", 201, "text/plain", fmt.Sprintf("{\"id\": %d}\n", id))
+			
+		case "/unsubscribe":
+			// DUMMY
+			// get the lock in order to perform action
+			broker.mu.Lock()
+			defer broker.mu.Unlock()
+			// delete the subscriber 
+			id, err := strconv.ParseInt(request.URL.Query().Get("id"), 10, 32)
+			if err != nil {
+				return wellFormed("400 Bad Request", 400, "text/plain", "in handlePubSubAction/unsubscribe\n")
+			}
+			delete(broker.subscribers, int(id))
+			return wellFormed("200 OK", 200, "text/plain", fmt.Sprintf("{\"unsubscribed\": %d}\n", id)) 
+
+		case "/publish":
+			// DUMMY
+			// get the lock in order to perform action
+			broker.mu.Lock()
+			defer broker.mu.Unlock()
+			// create a msg
+			body, _ := io.ReadAll(request.Body)
+			broker.nextSeq[topic]++
+			seq := broker.nextSeq[topic]
+			msg := Message{seq: int(seq), body: string(body)}
+
+			for _, sub := range broker.subscribers {
+				if sub.topic == topic {
+					sub.pending_msgs = append(sub.pending_msgs, msg)
+					fmt.Println("queued for subscriber", sub.id, "pending:", len(sub.pending_msgs))
+				}
+			}
+			return wellFormed("200 OK", 200, "text/plain", fmt.Sprintf("{\"published\": %s}\n", topic))
+			
+		case "/events":
+			// DUMMY
+			// get the lock in order to perform action
+			broker.mu.Lock()
+			defer broker.mu.Unlock()
+			// create a subscriber
+			broker.nextID++
+			id := broker.nextID
+			broker.subscribers[id] = &Subscriber{id: id, topic: topic}
+			return wellFormed("201 Created", 201, "text/plain", fmt.Sprintf("{\"id\": %d}\n", id))
+			
+		default:
+			return wellFormed("400 Bad Request", 400, "text/plain", "in handlePubSubAction/default\n")
+		}
 }
+	 
 
-func findFile(path string) (io.ReadCloser, error) {
+// __________________ PUBSUB _____________________________
+
+
+func findFile(path string) (string, error) {
     relative, _ := strings.CutPrefix(path, "/")
     fmt.Println(relative) 
-    data, err := os.Open(relative)
+    data, err := os.ReadFile(relative)
     if err != nil {
-        return nil, errors.New("file not found")
+        return "", errors.New("file not found")
     }
-    return data, nil
+    return string(data), nil
 }
 
 
