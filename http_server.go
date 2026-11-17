@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"bufio"
 	"net/http"
+	"sync"
     "io"
     "strings"
     "bytes"
@@ -136,11 +137,19 @@ func getResponse(request *http.Request) *http.Response {
 
 // TO DO just a copy of getResponse for now
 func postResponse(request *http.Request) *http.Response {
+    err := request.ParseMultipartForm(32 << 20)
+    if err != nil {
+        return wellFormed("507 insufficent storage", 507, "", io.NopCloser(bytes.NewReader(([]byte("")))))
+    }
     path := request.URL.EscapedPath()
-    body := request.Body
+    body, _, err := request.FormFile("file")
+    if err != nil {
+        fmt.Println(path) 
+        fmt.Println("error", err) 
+    }
     _, filetype, found := strings.CutLast(path, ".")
     if !found {
-        return wellFormed("404 Not Found", 404, filetype, io.NopCloser(bytes.NewReader(([]byte("hello")))))
+        return wellFormed("400 bad request", 400, filetype, io.NopCloser(bytes.NewReader(([]byte("")))))
     }
     switch filetype {
         case "html", "txt", "gif", "jpeg", "jpg", "css":
