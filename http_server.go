@@ -26,7 +26,7 @@ import (
     "strings"
     "bytes"
     "sync"
-	//"time" // for testing go routines
+	"time" 
 )
 
 
@@ -183,10 +183,10 @@ func postResponse(request *http.Request, broker *BrokerContext) *http.Response {
 	}
 
 	type Subscriber struct {
-		id      int
-		topic   string 
-		pending_msgs []Message // everything waiting to be sent to this subscriber
-	}
+		id      	int
+		topic   	string 
+		msg_channel chan Message // buffered queue that goroutines take msgs 
+		}						// from when they are available, otherwise sleep
 
 	type BrokerContext struct {
 		mu          sync.Mutex // only touch the subscriber list when you have the mutex 
@@ -212,16 +212,15 @@ func handlePubSubAction(request *http.Request, command string, broker *BrokerCon
 			// create a subscriber
 			broker.nextID++
 			id := broker.nextID
-			broker.subscribers[id] = &Subscriber{id: id, topic: topic}
+			broker.subscribers[id] = &Subscriber{id: id, topic: topic, msg_channel: make(chan Message, 16)}
 			return wellFormed("201 Created", 201, "text/plain", fmt.Sprintf("{\"id\": %d}\n", id))
 			
 		case "/unsubscribe":
-			// DUMMY
 			// get the lock in order to perform action
 			broker.mu.Lock()
 			defer broker.mu.Unlock()
 			// delete the subscriber 
-			id, err := strconv.ParseInt(request.URL.Query().Get("id"), 10, 32)
+			id, err := strconv.Atoi(request.URL.Query().Get("id"))
 			if err != nil {
 				return wellFormed("400 Bad Request", 400, "text/plain", "in handlePubSubAction/unsubscribe\n")
 			}
@@ -229,7 +228,6 @@ func handlePubSubAction(request *http.Request, command string, broker *BrokerCon
 			return wellFormed("200 OK", 200, "text/plain", fmt.Sprintf("{\"unsubscribed\": %d}\n", id)) 
 
 		case "/publish":
-			// DUMMY
 			// get the lock in order to perform action
 			broker.mu.Lock()
 			defer broker.mu.Unlock()
@@ -241,23 +239,44 @@ func handlePubSubAction(request *http.Request, command string, broker *BrokerCon
 
 			for _, sub := range broker.subscribers {
 				if sub.topic == topic {
-					sub.pending_msgs = append(sub.pending_msgs, msg)
-					fmt.Println("queued for subscriber", sub.id, "pending:", len(sub.pending_msgs))
+					select { // let this goroutine do 1 of these things depending on which is ready first
+						case sub.msg_channel <- msg: // put the msg in the buffer
+						default: // buffer is full -> skip this sub 
+					}
 				}
 			}
 			return wellFormed("200 OK", 200, "text/plain", fmt.Sprintf("{\"published\": %s}\n", topic))
 			
 		case "/events":
-			// DUMMY
-			// get the lock in order to perform action
-			broker.mu.Lock()
-			defer broker.mu.Unlock()
-			// create a subscriber
-			broker.nextID++
-			id := broker.nextID
-			broker.subscribers[id] = &Subscriber{id: id, topic: topic}
-			return wellFormed("201 Created", 201, "text/plain", fmt.Sprintf("{\"id\": %d}\n", id))
+			// try to get id
+			id, err := strconv.Atoi(request.URL.Query().Get("id"))
+			if err != nil {
+				return wellFormed("400 Bad Request", 400, "text/plain", "in handlePubSubAction/unsubscribe\n")
+			}
+			// get the state of this subscriber safely
+			broker.mu.Lock() 
+			sub, ok := broker.subscribers[id]
+			broker.mu.Unlock()
+			// if the subscriber doesnt exists or the topic doesnt match
+			var msg_output string
+			if !ok || sub.topic != topic {
+				return wellFormed("404 Not Found", 404, "text/plain", "unknown subscriber\n")
+			}
 			
+			select { // WAIT until one of these things are possible (no default)
+				case m := <-sub.msg_channel: // a msgs exists in in the subscribers msg buffer
+					msg_output += fmt.Sprintf("%d %s", m.seq, m.body)
+				case <-time.After(30*time.Second): // 30 sec elapsed -> timeout
+					return wellFormed("204 No Content", 204, "text/plain", "took too long\n")
+			}
+			for {
+				select {
+				case m := <-sub.msg_channel: // a msgs exists in in the subscribers msg buffer
+					msg_output += fmt.Sprintf("%d %s", m.seq, m.body)
+				default: // finish when no msg remain
+					return wellFormed("200 OK", 200, "text/plain", msg_output + "\n")
+				}				
+			}
 		default:
 			return wellFormed("400 Bad Request", 400, "text/plain", "in handlePubSubAction/default\n")
 		}
@@ -280,9 +299,10 @@ func findFile(path string) (string, error) {
 func postFile(path string, data []byte) error {
 	// find path/filename.* relative to this project 
     relative, _ := strings.CutPrefix(path, "/")
-	// create a file in an atomic way in the project dir
+	// try to create a file in an atomic way in the project dir
 	// we name is something temporary that no program can reference
 	// * gets replaced by random digits
+	// "." created the file at root
     temp, err := os.CreateTemp(".", ".upload-*")
     if err != nil {
         return err
