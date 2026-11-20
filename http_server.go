@@ -41,13 +41,15 @@ func main() {
 	}
 
 	// listen to a socket
-	ln, err := net.Listen("tcp", ":"+port)
+	ln, err := net.Listen("tcp", ":" + port)
 	if err != nil { // ASK what does panic mean as an error?
 		fmt.Println(err)
 		os.Exit(1) // can't continue without a listener
 	}
 	defer ln.Close() // ASK why does ada not have defer?
 	fmt.Println("listening on port", port)
+
+	channel := make(chan struct{}, 10) // We want to use 10 channels
 
 	// Accept each connection
 	for {
@@ -56,7 +58,12 @@ func main() {
 			fmt.Println(err)
 			continue // ASK why does ada not have continue?
 		}
-		go handleConnection(conn, broker)
+		channel <- struct{}{} // Occupy one of the 10 slots
+		go func() { // Run concurrently
+			defer func() { <-channel }() // Release the slot when finished
+			fmt.Println("Handler started")
+			handleConnection(conn, broker)
+		}()
 	}
 }
 
@@ -69,13 +76,12 @@ func handleConnection(conn net.Conn, broker *BrokerContext) {
 	// -- translate client's  http msg into a http struct
 	reader := bufio.NewReader(conn) // takes the incoming bytes and creates a reader
 	request, err := http.ReadRequest(reader) // formats the http msg
+	var response *http.Response
 	if err != nil {
-		fmt.Println("400!") // TO DO actual 400
-		return
+		response = wellFormed("400 Bad Request", 400, "text/plain", "in handlePubSubAction/topic\n")
 	}
 	// deal with the incoming http struct
 	method := request.Method // GET or POST
-	var response *http.Response
     switch method {
 		case "GET":
         	response = getResponse(request, broker)
@@ -153,13 +159,17 @@ func postResponse(request *http.Request, broker *BrokerContext) *http.Response {
 	}
     switch filetype {
         case "html", "txt", "gif", "jpeg", "jpg", "css":
-            body, err := findFile(path)
-       		if err != nil {
-				return wellFormed("404 Not Found", 404, filetype, "in postResponse/filetype\n")
+			data, err := io.ReadAll(request.Body)
+            if err != nil {
+            	return wellFormed("400 Bad Request", 400, "text/plain", "bad body\n")
 			}
-			return wellFormed("200 OK", 200, filetype, body)
+			err = postFile(path, data)
+			if err != nil {
+				return wellFormed("500 Internal Server Error", 500, "text/plain", "write Failed\n")
+			}
+			return wellFormed("201 Created", 201, "text/plain", "success")
         default:
-            return wellFormed("400 Bad Request", 400, filetype, "in postResponse/filetype\n")
+            return wellFormed("400 Bad Request", 400, "text/plain", "in postResponse/filetype\n")
     }
 }
 
@@ -265,6 +275,34 @@ func findFile(path string) (string, error) {
         return "", errors.New("file not found")
     }
     return string(data), nil
+}
+
+func postFile(path string, data []byte) error {
+	// find path/filename.* relative to this project 
+    relative, _ := strings.CutPrefix(path, "/")
+	// create a file in an atomic way in the project dir
+	// we name is something temporary that no program can reference
+	// * gets replaced by random digits
+    temp, err := os.CreateTemp(".", ".upload-*")
+    if err != nil {
+        return err
+    }
+    // if this func does not succeed -> remove temp
+    defer os.Remove(temp.Name()) 
+
+	// try to fill temp with data
+	_, err = temp.Write(data)
+    if err != nil {
+        temp.Close()
+        return err
+    }
+    // try to close temp
+    err = temp.Close()
+    if err != nil {
+        return err
+    }
+    // Rename temp to a real name atomically
+    return os.Rename(temp.Name(), relative) 
 }
 
 
